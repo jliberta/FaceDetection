@@ -15,6 +15,7 @@ namespace FaceDetection
 {
     class Program
     {
+        // Global variables for Azure resource access
         const string subscriptionKey = "e79135702bee4406a3853c28632f5711";
         const string uriBase = "https://eastus.api.cognitive.microsoft.com/face/v1.0/";
         private static HttpClient client;
@@ -32,6 +33,10 @@ namespace FaceDetection
             string imageFilePath = Console.ReadLine();
 
             Console.WriteLine(
+                "Listing person groups within Azure resource");
+            ListPersonGroups();
+
+            Console.Write(
                 "Enter the group of people you want to identify, will create a group if it doesn't exist: ");
             string personGroupName = Console.ReadLine();
             CreatePersonGroup(personGroupName);
@@ -90,18 +95,36 @@ namespace FaceDetection
             }
         }
 
-        static async void CreatePersonGroup(string name)
+        static void ListPersonGroups()
         {
-            string uri = uriBase + "/persongroups/" + name;
+            string uri = uriBase + "/persongroups";
 
-            HttpResponseMessage response = await client.GetAsync(uri);
+            HttpResponseMessage response = client.GetAsync(uri).Result;
+
+            string content = response.Content.ReadAsStringAsync().Result;
+
+            Console.WriteLine(JsonPrettyPrint(content));
+        }
+
+        static async Task<HttpResponseMessage> GetPersonGroupById(string Id)
+        {
+            string uri = uriBase + "/persongroups/" + Id;
+
+            return await client.GetAsync(uri);
+        }
+
+        static async void CreatePersonGroup(string Id)
+        {
+            string uri = uriBase + "/persongroups/" + Id;
+
+            HttpResponseMessage response = await GetPersonGroupById(Id);
 
             // If person group does not exist create it
             if (response.StatusCode != System.Net.HttpStatusCode.OK)
             {
                 JObject content = new JObject
                 {
-                    ["name"] = name
+                    ["name"] = Id
                 };
 
                 StringContent requestContent = new StringContent(JsonConvert.SerializeObject(content));
@@ -121,9 +144,19 @@ namespace FaceDetection
             }
         }
 
-        static void AddPersonToGroup(string name, string groupId)
+        static async void AddPersonToGroup(string name, string groupId)
         {
+            string uri = uriBase + "/persongroups/" + groupId + "/persons";
 
+            JObject content = new JObject
+            {
+                ["name"] = name
+            };
+
+            StringContent requestContent = new StringContent(JsonConvert.SerializeObject(content));
+            requestContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+            HttpResponseMessage response = await client.PostAsync(uri, requestContent);
         }
 
         static void AddFaceToPerson(string name, string groupId)
