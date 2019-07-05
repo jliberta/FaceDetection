@@ -29,7 +29,7 @@ namespace FaceDetection
 
             // Get the path and filename to process from the user.
             Console.Write(
-                "Enter the path to an image with faces that you wish to analyze: ");
+                "Enter the directory path to an image with faces that you wish to analyze: ");
             string imageFilePath = Console.ReadLine();
 
             Console.WriteLine(
@@ -41,12 +41,45 @@ namespace FaceDetection
             string personGroupName = Console.ReadLine();
             CreatePersonGroup(personGroupName);
 
+            Console.Write(
+                "Enter the name of the person: ");
+            string personName = Console.ReadLine();
+            AddPersonToGroup(personName, personGroupName);
 
-            if (File.Exists(imageFilePath))
+            if (Directory.Exists(imageFilePath))
             {
                 try
                 {
-                    MakeAnalysisRequest(imageFilePath);
+                    foreach (string path in Directory.GetFiles(imageFilePath))
+                    {
+                        Console.WriteLine(path); // Getpath of each file in the directory
+                        Console.WriteLine(Path.GetFileNameWithoutExtension(path));  // Get file name (person's name)
+                        // Create person in group and add facial image to person?
+                        //AddFaceToPerson(personName, personGroupName, path);
+
+                        //Train
+                        string uri = uriBase + "persongroups/" + personGroupName + "/train";
+                        client.PostAsync(uri, null);
+
+                        HttpResponseMessage response = client.GetAsync(uriBase + "persongroups/" + personGroupName + "/training").Result;
+                        string status;
+
+                        var message = response.Content.ReadAsStringAsync().Result;
+                        JObject result = JsonConvert.DeserializeObject<JObject>(message);
+                        status = result["status"].ToString();
+
+                        while (!String.Equals(status, "succeeded"))
+                        {
+                            Console.WriteLine("Training not complete");
+                            response = client.GetAsync(uriBase + "persongroups/" + personGroupName + "/training").Result;
+                            message = response.Content.ReadAsStringAsync().Result;
+                            result = JsonConvert.DeserializeObject<JObject>(message);
+                            status = result["status"].ToString();
+                        }
+
+                        Console.WriteLine("Fetching analysis after picture added");
+                        MakeAnalysisRequest(path);
+                    }
                     Console.WriteLine("\nWait a moment for the results to appear.\n");
                 }
                 catch (Exception e)
@@ -117,7 +150,7 @@ namespace FaceDetection
         {
             string uri = uriBase + "/persongroups/" + Id;
 
-            HttpResponseMessage response = await GetPersonGroupById(Id);
+            HttpResponseMessage response = GetPersonGroupById(Id).Result;
 
             // If person group does not exist create it
             if (response.StatusCode != System.Net.HttpStatusCode.OK)
@@ -140,28 +173,83 @@ namespace FaceDetection
             }
             else
             {
-                Console.WriteLine(response.Content.ReadAsStringAsync().Result);
+                Console.WriteLine("Person group with ID " + Id + " already exists");
             }
+        }
+
+        static string GetPersonId(string name, string groupId)
+        {
+            string uri = uriBase + "/persongroups/" + groupId + "/persons";
+            HttpResponseMessage response = client.GetAsync(uri).Result;
+
+            var message = response.Content.ReadAsStringAsync().Result;
+
+            JArray result = JsonConvert.DeserializeObject<JArray>(message);
+            
+            foreach(JToken token in result)
+            {
+                if (token["name"].ToString() == name)
+                {
+                    return token["personId"].ToString();
+                }
+            }
+
+            return String.Empty;
         }
 
         static async void AddPersonToGroup(string name, string groupId)
         {
-            string uri = uriBase + "/persongroups/" + groupId + "/persons";
-
-            JObject content = new JObject
+            if (GetPersonId(name, groupId) == String.Empty)
             {
-                ["name"] = name
-            };
+                string uri = uriBase + "/persongroups/" + groupId + "/persons";
 
-            StringContent requestContent = new StringContent(JsonConvert.SerializeObject(content));
-            requestContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                JObject content = new JObject
+                {
+                    ["name"] = name
+                };
 
-            HttpResponseMessage response = await client.PostAsync(uri, requestContent);
+                StringContent requestContent = new StringContent(JsonConvert.SerializeObject(content));
+                requestContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+
+                HttpResponseMessage response = await client.PostAsync(uri, requestContent);
+            }
+            else
+            {
+                Console.WriteLine("Person with ID " + name + " already exists...");
+            }
         }
 
-        static void AddFaceToPerson(string name, string groupId)
+        static async void AddFaceToPerson(string name, string groupId, string imageFilePath)
         {
+            string id = GetPersonId(name, groupId);
+            string uri = uriBase + "/persongroups/" + groupId + "/persons/" + id + "/persistedFaces";
 
+            HttpResponseMessage response;
+
+            try {
+                byte[] byteData = GetImageAsByteArray(imageFilePath);
+
+                using (ByteArrayContent content = new ByteArrayContent(byteData))
+            {
+                // This example uses content type "application/octet-stream".
+                content.Headers.ContentType =
+                    new MediaTypeHeaderValue("application/octet-stream");
+
+                // Execute the REST API call.
+                response = await client.PostAsync(uri, content);
+
+                // Get the JSON response.
+                string contentString = await response.Content.ReadAsStringAsync();
+
+                // Display the JSON response.
+                Console.WriteLine("\nResponse:\n");
+                Console.WriteLine(JsonPrettyPrint(contentString));
+                Console.WriteLine("\nPress Enter to exit...");
+            }
+            }
+            catch (Exception e) {
+                Console.WriteLine(e.Message);
+            }
         }
 
         #region Helper Methods
